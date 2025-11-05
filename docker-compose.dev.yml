@@ -1,0 +1,265 @@
+version: "3.9"
+
+services:
+  gateway:
+    image: traefik:v3.1
+    command:
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.http.address=:80"
+      - "--api.insecure=true"
+    ports:
+      - "80:80"
+      - "8080:8080" # Traefik dashboard
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"
+    networks:
+      - web
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./infra/postgres/init-multiple-dbs.sh:/docker-entrypoint-initdb.d/init-multiple-dbs.sh:ro
+    ports:
+      - "5432:5432"
+    networks:
+      - web
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    networks:
+      - web
+
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-guest}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-guest}
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    networks:
+      - web
+
+  minio:
+    image: quay.io/minio/minio:RELEASE.2024-10-13T13-34-11Z
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    volumes:
+      - minio:/data
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    networks:
+      - web
+
+  auth:
+    build:
+      context: ./services/auth
+    env_file: [.env]
+    environment:
+      SERVICE_NAME: auth
+      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-dev-secret}
+      DEBUG: "1"
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: auth_db
+      DB_USER: ${POSTGRES_USER:-postgres}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      REDIS_URL: redis://redis:6379/0
+      ALLOWED_HOSTS: "*"
+      CORS_ALLOW_ALL_ORIGINS: "true"
+      ORGS_BASE_URL: http://orgs:8000/api
+      ORGS_SERVICE_TOKEN: ${SERVICES_SHARED_TOKEN:-dev-service-token}
+    depends_on: [postgres, redis]
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=saasqt_web"
+      - "traefik.http.routers.auth.rule=PathPrefix(`/auth`)"
+      - "traefik.http.routers.auth.entrypoints=http"
+      - "traefik.http.services.auth.loadbalancer.server.port=8000"
+      - "traefik.http.middlewares.auth-strip.stripprefix.prefixes=/auth"
+      - "traefik.http.routers.auth.middlewares=auth-strip@docker"
+      # Host-based dev route (optional): http://auth.localhost
+      - "traefik.http.routers.auth-host.rule=Host(`auth.localhost`)"
+      - "traefik.http.routers.auth-host.entrypoints=http"
+      - "traefik.http.routers.auth-host.service=auth"
+    networks:
+      - web
+    ports:
+      - "8001:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8000/api/health || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  auth-celery:
+    build:
+      context: ./services/auth
+    env_file: [.env]
+    environment:
+      SERVICE_NAME: auth-celery
+      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-dev-secret}
+      DEBUG: "1"
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: auth_db
+      DB_USER: ${POSTGRES_USER:-postgres}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      REDIS_URL: redis://redis:6379/0
+      ALLOWED_HOSTS: "*"
+      CORS_ALLOW_ALL_ORIGINS: "true"
+      ORGS_BASE_URL: http://orgs:8000/api
+      ORGS_SERVICE_TOKEN: ${SERVICES_SHARED_TOKEN:-dev-service-token}
+      ROTATE_JWKS_EVERY_HOURS: ${ROTATE_JWKS_EVERY_HOURS:-12}
+    depends_on: [postgres, redis]
+    command: ["celery", "-A", "auth_service.celery:app", "worker", "-l", "info"]
+    networks:
+      - web
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A auth_service.celery:app inspect ping -t 3 >/dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    restart: unless-stopped
+
+  auth-beat:
+    build:
+      context: ./services/auth
+    env_file: [.env]
+    environment:
+      SERVICE_NAME: auth-beat
+      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-dev-secret}
+      DEBUG: "1"
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: auth_db
+      DB_USER: ${POSTGRES_USER:-postgres}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      REDIS_URL: redis://redis:6379/0
+      ALLOWED_HOSTS: "*"
+      CORS_ALLOW_ALL_ORIGINS: "true"
+      ORGS_BASE_URL: http://orgs:8000/api
+      ORGS_SERVICE_TOKEN: ${SERVICES_SHARED_TOKEN:-dev-service-token}
+      ROTATE_JWKS_EVERY_HOURS: ${ROTATE_JWKS_EVERY_HOURS:-12}
+      ROTATE_JWKS_CRON_HOUR: ${ROTATE_JWKS_CRON_HOUR:-2}
+      CLEANUP_JWKS_CRON_HOUR: ${CLEANUP_JWKS_CRON_HOUR:-3}
+      SERVICE_JWT_RETENTION_DAYS: ${SERVICE_JWT_RETENTION_DAYS:-2}
+    depends_on: [postgres, redis]
+    command: ["celery", "-A", "auth_service.celery:app", "beat", "-l", "info"]
+    networks:
+      - web
+    healthcheck:
+      test: ["CMD-SHELL", "ps aux | grep -v grep | grep 'celery beat' >/dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    restart: unless-stopped
+
+  orgs:
+    build:
+      context: ./services/orgs
+    env_file: [.env]
+    environment:
+      SERVICE_NAME: orgs
+      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-dev-secret}
+      DEBUG: "1"
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: orgs_db
+      DB_USER: ${POSTGRES_USER:-postgres}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      REDIS_URL: redis://redis:6379/0
+      ALLOWED_HOSTS: "*"
+      CORS_ALLOW_ALL_ORIGINS: "true"
+      ORGS_SERVICE_TOKEN: ${SERVICES_SHARED_TOKEN:-dev-service-token}
+      SERVICES_JWT_SECRET: ${SERVICES_JWT_SECRET:-dev-service-hs256-secret}
+      SERVICES_JWT_AUDIENCE: orgs
+      SERVICES_JWKS_URL: http://auth:8000/api/service/jwks
+    depends_on: [postgres, redis]
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=saasqt_web"
+      - "traefik.http.routers.orgs.rule=PathPrefix(`/orgs`)"
+      - "traefik.http.routers.orgs.entrypoints=http"
+      - "traefik.http.services.orgs.loadbalancer.server.port=8000"
+      - "traefik.http.middlewares.orgs-strip.stripprefix.prefixes=/orgs"
+      - "traefik.http.routers.orgs.middlewares=orgs-strip@docker"
+      # Host-based dev route (optional): http://orgs.localhost
+      - "traefik.http.routers.orgs-host.rule=Host(`orgs.localhost`)"
+      - "traefik.http.routers.orgs-host.entrypoints=http"
+      - "traefik.http.routers.orgs-host.service=orgs"
+    networks:
+      - web
+    ports:
+      - "8002:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8000/api/health || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  tms:
+    build:
+      context: ./services/tms
+    env_file: [.env]
+    environment:
+      SERVICE_NAME: tms
+      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-dev-secret}
+      DEBUG: "1"
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: tms_db
+      DB_USER: ${POSTGRES_USER:-postgres}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      REDIS_URL: redis://redis:6379/0
+      ALLOWED_HOSTS: "*"
+      CORS_ALLOW_ALL_ORIGINS: "true"
+      ORGS_BASE_URL: http://orgs:8000/api
+      ORGS_SERVICE_TOKEN: ${SERVICES_SHARED_TOKEN:-dev-service-token}
+      SERVICES_JWT_SECRET: ${SERVICES_JWT_SECRET:-dev-service-hs256-secret}
+      SERVICES_JWT_ISSUER: tms
+      SERVICES_JWT_AUDIENCE: orgs
+      AUTH_BASE_URL: http://auth:8000/api
+    depends_on: [postgres, redis]
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=saasqt_web"
+      - "traefik.http.routers.tms.rule=PathPrefix(`/tms`)"
+      - "traefik.http.routers.tms.entrypoints=http"
+      - "traefik.http.services.tms.loadbalancer.server.port=8000"
+      - "traefik.http.middlewares.tms-strip.stripprefix.prefixes=/tms"
+      - "traefik.http.routers.tms.middlewares=tms-strip@docker"
+      # Host-based dev route (optional): http://tms.localhost
+      - "traefik.http.routers.tms-host.rule=Host(`tms.localhost`)"
+      - "traefik.http.routers.tms-host.entrypoints=http"
+      - "traefik.http.routers.tms-host.service=tms"
+    networks:
+      - web
+    ports:
+      - "8003:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8000/api/health || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+networks:
+  web:
+    driver: bridge
+
+volumes:
+  pgdata:
+  minio:

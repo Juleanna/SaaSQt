@@ -1,0 +1,81 @@
+name: CI - Smoke (Postman) + OpenAPI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install validators
+        run: |
+          python -m pip install --upgrade pip
+          pip install openapi-spec-validator
+
+      - name: Start stack (Docker Compose)
+        run: |
+          docker compose -f docker-compose.dev.yml up -d --build
+
+      - name: Wait for services health
+        run: |
+          tries=60
+          until curl -sf http://localhost/auth/api/health >/dev/null; do echo "waiting auth"; sleep 2; tries=$((tries-1)); [ $tries -le 0 ] && exit 1; done
+          tries=60
+          until curl -sf http://localhost/orgs/api/health >/dev/null; do echo "waiting orgs"; sleep 2; tries=$((tries-1)); [ $tries -le 0 ] && exit 1; done
+          tries=60
+          until curl -sf http://localhost/tms/api/health >/dev/null; do echo "waiting tms"; sleep 2; tries=$((tries-1)); [ $tries -le 0 ] && exit 1; done
+
+      - name: Export OpenAPI schemas
+        run: |
+          mkdir -p artifacts/openapi
+          curl -sf http://localhost/auth/api/schema -o artifacts/openapi/auth.json
+          curl -sf http://localhost/orgs/api/schema -o artifacts/openapi/orgs.json
+          curl -sf http://localhost/tms/api/schema -o artifacts/openapi/tms.json
+
+      - name: Validate OpenAPI schemas
+        run: |
+          python - <<'PY'
+          import json, sys
+          from openapi_spec_validator import validate_spec
+          for p in ["artifacts/openapi/auth.json","artifacts/openapi/orgs.json","artifacts/openapi/tms.json"]:
+              with open(p,'r',encoding='utf-8') as f:
+                  data=json.load(f)
+              validate_spec(data)
+              print(f"Validated: {p}")
+          PY
+
+      - name: Upload OpenAPI artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: openapi-schemas
+          path: artifacts/openapi/*.json
+
+      - name: Run Postman Newman (smoke)
+        uses: postmanlabs/newman-action@v1
+        with:
+          collection: collections/postman/TestCloud.postman_collection.json
+          environment: collections/postman/TestCloud.postman_environment.json
+          reporters: cli
+
+      - name: Run Postman Newman (TMS Test Manager smoke)
+        uses: postmanlabs/newman-action@v1
+        with:
+          collection: collections/postman/TestCloud.tms_test_manager_smoke.postman_collection.json
+          environment: collections/postman/TestCloud.postman_environment.json
+          reporters: cli
+
+      - name: Stop stack
+        if: always()
+        run: |
+          docker compose -f docker-compose.dev.yml down -v

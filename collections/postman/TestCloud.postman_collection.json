@@ -1,0 +1,231 @@
+{
+  "info": {
+    "name": "TestCloud Suite",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_postman_id": "6f9d2b5a-d9b8-4d7b-9e3b-000000000001"
+  },
+  "item": [
+    {
+      "name": "Auth: Health",
+      "request": {"method":"GET","url":"{{base}}/auth/api/health"}
+    },
+    {
+      "name": "Auth: Token",
+      "request": {
+        "method": "POST",
+        "header": [{"key":"Content-Type","value":"application/json"}],
+        "body": {"mode":"raw","raw":"{\n  \"username\": \"demo@example.com\",\n  \"password\": \"Secret123!\",\n  \"tenant_id\": 2\n}"},
+        "url": "{{base}}/auth/api/auth/token"
+      },
+      "event": [
+        {"listen":"test","script":{"type":"text/javascript","exec":[
+          "try { var d = pm.response.json(); if (d && d.access) pm.environment.set('access', d.access); } catch(e) {}"
+        ]}}
+      ],
+      "response": []
+    },
+    {
+      "name": "Auth: Switch Tenant",
+      "request": {
+        "method": "POST",
+        "header": [
+          {"key":"Content-Type","value":"application/json"},
+          {"key":"Authorization","value":"Bearer {{access}}"}
+        ],
+        "body": {"mode":"raw","raw":"{\n  \"tenant_id\": 2\n}"},
+        "url": "{{base}}/auth/api/auth/switch-tenant"
+      }
+    },
+    {
+      "name": "Service: JWKS",
+      "request": {"method":"GET","url":"{{base}}/auth/api/service/jwks"}
+    },
+    {
+      "name": "Service: Issue Token",
+      "request": {
+        "method": "POST",
+        "header": [
+          {"key":"Content-Type","value":"application/json"},
+          {"key":"Authorization","value":"Service {{service_token}}"}
+        ],
+        "body": {"mode":"raw","raw":"{\n  \"aud\": \"orgs\",\n  \"sub\": \"tms\"\n}"},
+        "url": "{{base}}/auth/api/service/token"
+      }
+    },
+    {
+      "name": "Orgs: Tenants (list)",
+      "request": {"method":"GET","header":[{"key":"Authorization","value":"Bearer {{access}}"}],"url":"{{base}}/orgs/api/tenants/"}
+    },
+    {
+      "name": "Orgs: Create tenant",
+      "request": {
+        "method": "POST",
+        "header": [
+          {"key": "Content-Type", "value": "application/json"},
+          {"key": "Authorization", "value": "Bearer {{access}}"}
+        ],
+        "body": {"mode":"raw","raw":"{\n  \"name\": \"Acme QA\",\n  \"slug\": \"acme-qa\",\n  \"owner_user_id\": 1\n}"},
+        "url": "{{base}}/orgs/api/tenants/"
+      },
+      "event": [
+        {"listen":"test","script":{"type":"text/javascript","exec":[
+          "try { var d = pm.response.json(); if (d && d.id) pm.environment.set('tenant_id', d.id); } catch(e) {}"
+        ]}}
+      ]
+    },
+    {
+      "name": "Orgs: Seed roles",
+      "request": {
+        "method": "POST",
+        "header": [ {"key":"Authorization","value":"Bearer {{access}}"} ],
+        "url": "{{base}}/orgs/api/tenants/{{tenant_id}}/seed_roles/"
+      },
+      "event": [
+        {"listen":"test","script":{"type":"text/javascript","exec":[
+          "try { var arr = pm.response.json(); if (Array.isArray(arr)) { var m = arr.find(r => r.key === 'member'); if (m && m.id) pm.environment.set('member_role_id', m.id); } } catch(e) {}"
+        ]}}
+      ]
+    },
+    {
+      "name": "Orgs: Create invitation",
+      "request": {
+        "method": "POST",
+        "header": [
+          {"key":"Content-Type","value":"application/json"},
+          {"key":"Authorization","value":"Bearer {{access}}"}
+        ],
+        "body": {"mode":"raw","raw":"{\n  \"tenant\": {{tenant_id}},\n  \"email\": \"demo2@example.com\",\n  \"role\": {{member_role_id}}\n}"},
+        "url": "{{base}}/orgs/api/invitations/"
+      },
+      "event": [
+        {"listen":"test","script":{"type":"text/javascript","exec":[
+          "try { var d = pm.response.json(); if (d && d.id) pm.environment.set('invitation_id', d.id); } catch(e) {}"
+        ]}}
+      ]
+    },
+    {
+      "name": "Orgs: Resend invitation",
+      "request": {
+        "method": "POST",
+        "header": [ {"key":"Authorization","value":"Bearer {{access}}"} ],
+        "url": "{{base}}/orgs/api/invitations/{{invitation_id}}/resend/"
+      }
+    },
+    {
+      "name": "Orgs: Accept invitation (email має збігатися)",
+      "request": {
+        "method": "POST",
+        "header": [ {"key":"Authorization","value":"Bearer {{access}}"} ],
+        "url": "{{base}}/orgs/api/invitations/{{invitation_id}}/accept/"
+      }
+    },
+    
+    {
+      "name": "TMS: Projects list",
+      "request": {
+        "method": "GET",
+        "header": [
+          {"key":"Authorization","value":"Bearer {{access}}"},
+          {"key":"X-Tenant-ID","value":"2"}
+        ],
+        "url": "{{base}}/tms/api/projects/"
+      }
+    },
+    {
+      "name": "TMS: Create project",
+      "request": {
+        "method": "POST",
+        "header": [
+          {"key":"Content-Type","value":"application/json"},
+          {"key":"Authorization","value":"Bearer {{access}}"},
+          {"key":"X-Tenant-ID","value":"{{tenant_id}}"}
+        ],
+        "body": {"mode":"raw","raw":"{\n  \"tenant_id\": {{tenant_id}},\n  \"key\": \"ACME\",\n  \"name\": \"Acme Project\"\n}"},
+        "url": "{{base}}/tms/api/projects/"
+      },
+      "event": [
+        {"listen":"test","script":{"type":"text/javascript","exec":[
+          "try { var d = pm.response.json(); if (d && d.id) pm.environment.set('project_id', d.id); } catch(e) {}"
+        ]}}
+      ]
+    },
+    {
+      "name": "TMS: Create TestCase",
+      "request": {
+        "method": "POST",
+        "header": [
+          {"key":"Content-Type","value":"application/json"},
+          {"key":"Authorization","value":"Bearer {{access}}"},
+          {"key":"X-Tenant-ID","value":"{{tenant_id}}"}
+        ],
+        "body": {"mode":"raw","raw":"{\n  \"project\": {{project_id}},\n  \"title\": \"Login works\",\n  \"description\": \"...\",\n  \"steps\": [],\n  \"tags\": [],\n  \"status\": \"active\",\n  \"version\": 1\n}"},
+        "url": "{{base}}/tms/api/testcases/"
+      },
+      "event": [
+        {"listen":"test","script":{"type":"text/javascript","exec":[
+          "try { var d = pm.response.json(); if (d && d.id) pm.environment.set('testcase_id', d.id); } catch(e) {}"
+        ]}}
+      ]
+    },
+    {
+      "name": "TMS: Create suite",
+      "request": {
+        "method": "POST",
+        "header": [
+          {"key":"Content-Type","value":"application/json"},
+          {"key":"Authorization","value":"Bearer {{access}}"},
+          {"key":"X-Tenant-ID","value":"{{tenant_id}}"}
+        ],
+        "body": {"mode":"raw","raw":"{\n  \"project\": {{project_id}},\n  \"name\": \"Smoke\"\n}"},
+        "url": "{{base}}/tms/api/suites/"
+      },
+      "event": [
+        {"listen":"test","script":{"type":"text/javascript","exec":[
+          "try { var d = pm.response.json(); if (d && d.id) pm.environment.set('suite_id', d.id); } catch(e) {}"
+        ]}}
+      ]
+    },
+    {
+      "name": "TMS: Add suite-case",
+      "request": {
+        "method": "POST",
+        "header": [
+          {"key":"Content-Type","value":"application/json"},
+          {"key":"Authorization","value":"Bearer {{access}}"},
+          {"key":"X-Tenant-ID","value":"{{tenant_id}}"}
+        ],
+        "body": {"mode":"raw","raw":"{\n  \"suite\": {{suite_id}},\n  \"test_case\": {{testcase_id}},\n  \"order\": 1\n}"},
+        "url": "{{base}}/tms/api/suite-cases/"
+      },
+      "event": [
+        {"listen":"test","script":{"type":"text/javascript","exec":[
+          "try { var d = pm.response.json(); if (d && d.id) pm.environment.set('suite_case_id', d.id); } catch(e) {}"
+        ]}}
+      ]
+    },
+    {
+      "name": "TMS: Move suite-case",
+      "request": {
+        "method": "POST",
+        "header": [
+          {"key":"Content-Type","value":"application/json"},
+          {"key":"Authorization","value":"Bearer {{access}}"},
+          {"key":"X-Tenant-ID","value":"{{tenant_id}}"}
+        ],
+        "body": {"mode":"raw","raw":"{\n  \"order\": 3\n}"},
+        "url": "{{base}}/tms/api/suite-cases/{{suite_case_id}}/move/"
+      }
+    }
+  ],
+  "variable": [
+    {"key":"base","value":"http://localhost"},
+    {"key":"access","value":""},
+    {"key":"service_token","value":"dev-service-token"},
+    {"key":"tenant_id","value":"2"},
+    {"key":"member_role_id","value":"3"},
+    {"key":"project_id","value":"1"},
+    {"key":"suite_id","value":"1"},
+    {"key":"testcase_id","value":"1"},
+    {"key":"suite_case_id","value":"1"}
+  ]
+}
