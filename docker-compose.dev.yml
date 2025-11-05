@@ -84,6 +84,7 @@ services:
       - "traefik.enable=true"
       - "traefik.docker.network=saasqt_web"
       - "traefik.http.routers.auth.rule=PathPrefix(`/auth`)"
+      - "traefik.http.routers.auth.priority=10"
       - "traefik.http.routers.auth.entrypoints=http"
       - "traefik.http.services.auth.loadbalancer.server.port=8000"
       - "traefik.http.middlewares.auth-strip.stripprefix.prefixes=/auth"
@@ -191,6 +192,7 @@ services:
       - "traefik.enable=true"
       - "traefik.docker.network=saasqt_web"
       - "traefik.http.routers.orgs.rule=PathPrefix(`/orgs`)"
+      - "traefik.http.routers.orgs.priority=10"
       - "traefik.http.routers.orgs.entrypoints=http"
       - "traefik.http.services.orgs.loadbalancer.server.port=8000"
       - "traefik.http.middlewares.orgs-strip.stripprefix.prefixes=/orgs"
@@ -237,6 +239,7 @@ services:
       - "traefik.enable=true"
       - "traefik.docker.network=saasqt_web"
       - "traefik.http.routers.tms.rule=PathPrefix(`/tms`)"
+      - "traefik.http.routers.tms.priority=10"
       - "traefik.http.routers.tms.entrypoints=http"
       - "traefik.http.services.tms.loadbalancer.server.port=8000"
       - "traefik.http.middlewares.tms-strip.stripprefix.prefixes=/tms"
@@ -256,6 +259,24 @@ services:
       retries: 10
     restart: unless-stopped
 
+
+  frontend:
+    build:
+      context: ./frontend
+    depends_on: [gateway]
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=saasqt_web"
+      - "traefik.http.routers.frontend.rule=PathPrefix(`/`)"
+      - "traefik.http.routers.frontend.entrypoints=http"
+      - "traefik.http.routers.frontend.priority=-1"
+      - "traefik.http.services.frontend.loadbalancer.server.port=80"
+      - "traefik.http.routers.frontend-host.rule=Host(`app.localhost`)"
+      - "traefik.http.routers.frontend-host.entrypoints=http"
+      - "traefik.http.routers.frontend-host.service=frontend"
+    networks:
+      - web
+
 networks:
   web:
     driver: bridge
@@ -263,3 +284,4 @@ networks:
 volumes:
   pgdata:
   minio:
+
