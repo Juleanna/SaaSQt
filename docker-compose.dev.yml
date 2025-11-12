@@ -23,11 +23,15 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
     volumes:
       - pgdata:/var/lib/postgresql/data
-      - ./infra/postgres/init-multiple-dbs.sh:/docker-entrypoint-initdb.d/init-multiple-dbs.sh:ro
     ports:
       - "5432:5432"
     networks:
       - web
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
 
   redis:
     image: redis:7-alpine
@@ -35,6 +39,11 @@ services:
       - "6379:6379"
     networks:
       - web
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
 
   rabbitmq:
     image: rabbitmq:3-management-alpine
@@ -46,6 +55,11 @@ services:
       - "15672:15672"
     networks:
       - web
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
 
   minio:
     image: quay.io/minio/minio:RELEASE.2024-10-13T13-34-11Z
@@ -79,7 +93,16 @@ services:
       CORS_ALLOW_ALL_ORIGINS: "true"
       ORGS_BASE_URL: http://orgs:8000/api
       ORGS_SERVICE_TOKEN: ${SERVICES_SHARED_TOKEN:-dev-service-token}
-    depends_on: [postgres, redis]
+      CELERY_BROKER_URL: amqp://guest:guest@rabbitmq:5672//
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+      DJANGO_SUPERUSER_USERNAME: ${DJANGO_SUPERUSER_USERNAME:-admin}
+      DJANGO_SUPERUSER_EMAIL: ${DJANGO_SUPERUSER_EMAIL:-admin@example.com}
+      DJANGO_SUPERUSER_PASSWORD: ${DJANGO_SUPERUSER_PASSWORD:-admin123}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
     labels:
       - "traefik.enable=true"
       - "traefik.docker.network=saasqt_web"
@@ -123,8 +146,17 @@ services:
       ORGS_BASE_URL: http://orgs:8000/api
       ORGS_SERVICE_TOKEN: ${SERVICES_SHARED_TOKEN:-dev-service-token}
       ROTATE_JWKS_EVERY_HOURS: ${ROTATE_JWKS_EVERY_HOURS:-12}
-    depends_on: [postgres, redis]
-    command: ["celery", "-A", "auth_service.celery:app", "worker", "-l", "info"]
+      CELERY_BROKER_URL: amqp://guest:guest@rabbitmq:5672//
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      rabbitmq:
+        condition: service_healthy
+    command:
+      ["sh", "-c", "python wait_for_broker.py && celery -A auth_service.celery:app worker -l info"]
     networks:
       - web
     healthcheck:
@@ -156,8 +188,17 @@ services:
       ROTATE_JWKS_CRON_HOUR: ${ROTATE_JWKS_CRON_HOUR:-2}
       CLEANUP_JWKS_CRON_HOUR: ${CLEANUP_JWKS_CRON_HOUR:-3}
       SERVICE_JWT_RETENTION_DAYS: ${SERVICE_JWT_RETENTION_DAYS:-2}
-    depends_on: [postgres, redis]
-    command: ["celery", "-A", "auth_service.celery:app", "beat", "-l", "info"]
+      CELERY_BROKER_URL: amqp://guest:guest@rabbitmq:5672//
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      rabbitmq:
+        condition: service_healthy
+    command:
+      ["sh", "-c", "python wait_for_broker.py && celery -A auth_service.celery:app beat -l info"]
     networks:
       - web
     healthcheck:
@@ -187,7 +228,11 @@ services:
       SERVICES_JWT_SECRET: ${SERVICES_JWT_SECRET:-dev-service-hs256-secret}
       SERVICES_JWT_AUDIENCE: orgs
       SERVICES_JWKS_URL: http://auth:8000/api/service/jwks
-    depends_on: [postgres, redis]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
     labels:
       - "traefik.enable=true"
       - "traefik.docker.network=saasqt_web"
@@ -234,7 +279,11 @@ services:
       SERVICES_JWT_ISSUER: tms
       SERVICES_JWT_AUDIENCE: orgs
       AUTH_BASE_URL: http://auth:8000/api
-    depends_on: [postgres, redis]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
     labels:
       - "traefik.enable=true"
       - "traefik.docker.network=saasqt_web"
@@ -263,7 +312,15 @@ services:
   frontend:
     build:
       context: ./frontend
-    depends_on: [gateway]
+    depends_on:
+      gateway:
+        condition: service_started
+      auth:
+        condition: service_started
+      orgs:
+        condition: service_started
+      tms:
+        condition: service_started
     labels:
       - "traefik.enable=true"
       - "traefik.docker.network=saasqt_web"

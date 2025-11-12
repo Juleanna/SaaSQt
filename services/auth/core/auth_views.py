@@ -109,7 +109,25 @@ class ThrottledTokenObtainPairView(TokenObtainPairView):
 
 
 class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
+    def _maybe_map_email_to_username(self, attrs):
+        username = attrs.get(self.username_field)
+        if not username:
+            return attrs
+
+        try:
+            from django.contrib.auth import get_user_model
+
+            User = get_user_model()
+            lookup = {"email__iexact": username}
+            user = User.objects.filter(**lookup).only(User.USERNAME_FIELD).first()
+            if user:
+                attrs[self.username_field] = getattr(user, User.USERNAME_FIELD)
+        except Exception:
+            pass
+        return attrs
+
     def validate(self, attrs):
+        attrs = self._maybe_map_email_to_username(attrs)
         data = super().validate(attrs)
         # Optional: accept tenant_id in login payload to set context
         tenant_id = None
