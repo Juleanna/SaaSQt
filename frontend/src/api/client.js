@@ -170,9 +170,47 @@ class ApiClient {
     return this.request('/tms/api/projects/');
   }
 
+  async updateTenant(id, payload) {
+    return this.request(`/orgs/api/tenants/${id}/`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async getTenantMembers(tenantId) {
+    return this.request(`/orgs/api/memberships/?tenant=${tenantId}`);
+  }
+
+  async deleteMembership(id) {
+    return this.request(`/orgs/api/memberships/${id}/`, {
+      method: 'DELETE',
+    });
+  }
+
+  async createInvitation(payload) {
+    return this.request('/orgs/api/invitations/', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
   async createProject(payload) {
     return this.request('/tms/api/projects/', {
       method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async createRelease(payload) {
+    return this.request('/tms/api/releases/', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async updatePlan(id, payload) {
+    return this.request(`/tms/api/plans/${id}/`, {
+      method: 'PATCH',
       body: JSON.stringify(payload),
     });
   }
