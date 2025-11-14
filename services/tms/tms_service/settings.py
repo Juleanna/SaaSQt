@@ -114,6 +114,9 @@ CACHES = {
     }
 }
 
+TEST_MANAGER_IMPORT_ROOT = env('TEST_MANAGER_IMPORT_ROOT', default=str(BASE_DIR / 'test_manager_imports'))
+TEST_MANAGER_EXPORT_ROOT = env('TEST_MANAGER_EXPORT_ROOT', default=str(BASE_DIR / 'test_manager_exports'))
+
 # Inter-service config
 ORGS_BASE_URL = env('ORGS_BASE_URL', default='http://orgs:8000/api')
 ORGS_SERVICE_TOKEN = env('ORGS_SERVICE_TOKEN', default=None)

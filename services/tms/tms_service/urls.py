@@ -6,20 +6,27 @@ from core.viewsets import (
     ProjectViewSet, TestCaseViewSet, SuiteViewSet, SuiteCaseViewSet,
     ReleaseViewSet, TestCaseVersionViewSet, TestPlanViewSet, PlanItemViewSet,
     TestRunViewSet, TestInstanceViewSet,
+    TestSectionViewSet, TestTagViewSet, RequirementViewSet,
+    TestImportJobViewSet, TestExportJobViewSet,
 )
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 
 router = DefaultRouter()
 router.register(r'projects', ProjectViewSet, basename='project')
 router.register(r'testcases', TestCaseViewSet, basename='testcase')
+router.register(r'sections', TestSectionViewSet, basename='section')
+router.register(r'tags', TestTagViewSet, basename='testtag')
 router.register(r'suites', SuiteViewSet, basename='suite')
 router.register(r'suite-cases', SuiteCaseViewSet, basename='suitecase')
 router.register(r'releases', ReleaseViewSet, basename='release')
+router.register(r'requirements', RequirementViewSet, basename='requirement')
 router.register(r'testcase-versions', TestCaseVersionViewSet, basename='testcaseversion')
 router.register(r'plans', TestPlanViewSet, basename='testplan')
 router.register(r'plan-items', PlanItemViewSet, basename='planitem')
 router.register(r'runs', TestRunViewSet, basename='testrun')
 router.register(r'instances', TestInstanceViewSet, basename='testinstance')
+router.register(r'import-jobs', TestImportJobViewSet, basename='importjob')
+router.register(r'export-jobs', TestExportJobViewSet, basename='exportjob')
 
 urlpatterns = [
     path('admin/', admin.site.urls),

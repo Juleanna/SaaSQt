@@ -5,6 +5,7 @@ class Project(models.Model):
     tenant_id = models.BigIntegerField()
     key = models.CharField(max_length=20)
     name = models.CharField(max_length=200)
+    description = models.TextField(blank=True, default='')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -16,17 +17,86 @@ class Project(models.Model):
         ]
 
 
+class TestSection(models.Model):
+    project = models.ForeignKey(Project, related_name='sections', on_delete=models.CASCADE)
+    parent = models.ForeignKey('self', related_name='children', on_delete=models.CASCADE, null=True, blank=True)
+    name = models.CharField(max_length=200)
+    order = models.PositiveIntegerField(default=0)
+    path = models.CharField(max_length=255, blank=True, default='')
+
+    class Meta:
+        unique_together = ('project', 'parent', 'name')
+        indexes = [
+            models.Index(fields=['project']),
+            models.Index(fields=['parent']),
+            models.Index(fields=['project', 'path']),
+        ]
+        ordering = ['order', 'id']
+
+    def save(self, *args, **kwargs):
+        super().save(*args, **kwargs)
+        new_path = f"{self.parent.path}/{self.pk}" if self.parent and self.parent.path else (f"{self.parent.pk}/{self.pk}" if self.parent else str(self.pk))
+        if self.path != new_path:
+            self.path = new_path
+            super().save(update_fields=['path'])
+
+
+class TestTag(models.Model):
+    project = models.ForeignKey(Project, related_name='tags', on_delete=models.CASCADE)
+    name = models.CharField(max_length=50)
+    color = models.CharField(max_length=20, blank=True, default='')
+
+    class Meta:
+        unique_together = ('project', 'name')
+        indexes = [
+            models.Index(fields=['project']),
+            models.Index(fields=['project', 'name']),
+        ]
+
+
+class Requirement(models.Model):
+    STATUS_CHOICES = (
+        ('draft', 'Draft'),
+        ('active', 'Active'),
+        ('deprecated', 'Deprecated'),
+    )
+    project = models.ForeignKey(Project, related_name='requirements', on_delete=models.CASCADE)
+    external_id = models.CharField(max_length=100, blank=True, default='')
+    title = models.CharField(max_length=255)
+    description = models.TextField(blank=True, default='')
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='active')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['project']),
+            models.Index(fields=['project', 'external_id']),
+            models.Index(fields=['status']),
+        ]
+
+
 class TestCase(models.Model):
     STATUS_CHOICES = (
         ('active', 'Active'),
         ('archived', 'Archived'),
     )
+    PRIORITY_CHOICES = (
+        ('low', 'Low'),
+        ('medium', 'Medium'),
+        ('high', 'High'),
+        ('critical', 'Critical'),
+    )
     project = models.ForeignKey(Project, related_name='test_cases', on_delete=models.CASCADE)
+    section = models.ForeignKey(TestSection, related_name='test_cases', on_delete=models.SET_NULL, null=True, blank=True)
     title = models.CharField(max_length=300)
     description = models.TextField(blank=True, default='')
     steps = models.JSONField(default=list, blank=True)
     tags = models.JSONField(default=list, blank=True)
+    labels = models.ManyToManyField(TestTag, related_name='test_cases', blank=True)
+    requirements = models.ManyToManyField(Requirement, related_name='test_cases', blank=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='active')
+    priority = models.CharField(max_length=20, choices=PRIORITY_CHOICES, default='medium')
     version = models.IntegerField(default=1)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -182,4 +252,49 @@ class TestInstance(models.Model):
             models.Index(fields=['status']),
             models.Index(fields=['run', 'status']),
             models.Index(fields=['automation_ref']),
+        ]     
+
+
+class TestImportJob(models.Model):
+    STATUS_CHOICES = (
+        ('pending', 'Pending'),
+        ('processing', 'Processing'),
+        ('completed', 'Completed'),
+        ('failed', 'Failed'),
+    )
+    project = models.ForeignKey(Project, related_name='import_jobs', on_delete=models.CASCADE)
+    created_by_user_id = models.BigIntegerField(null=True, blank=True)
+    file_path = models.CharField(max_length=500)
+    file_format = models.CharField(max_length=20, default='csv')
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+    total_records = models.IntegerField(default=0)
+    processed_records = models.IntegerField(default=0)
+    error_message = models.TextField(blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['project']),
+            models.Index(fields=['status']),
+            models.Index(fields=['created_at']),
+        ]
+
+
+class TestExportJob(models.Model):
+    STATUS_CHOICES = TestImportJob.STATUS_CHOICES
+    project = models.ForeignKey(Project, related_name='export_jobs', on_delete=models.CASCADE)
+    created_by_user_id = models.BigIntegerField(null=True, blank=True)
+    query = models.JSONField(default=dict, blank=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+    file_path = models.CharField(max_length=500, blank=True, default='')
+    error_message = models.TextField(blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['project']),
+            models.Index(fields=['status']),
+            models.Index(fields=['created_at']),
         ]

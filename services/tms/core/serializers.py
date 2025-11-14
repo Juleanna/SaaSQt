@@ -10,19 +10,63 @@ from .models import (
     PlanItem,
     TestRun,
     TestInstance,
+    TestSection,
+    TestTag,
+    Requirement,
+    TestImportJob,
+    TestExportJob,
 )
+
+class TestSectionSerializer(serializers.ModelSerializer):
+    child_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = TestSection
+        fields = ['id', 'project', 'parent', 'name', 'order', 'path', 'child_count']
+        read_only_fields = ['path', 'child_count']
+
+    def get_child_count(self, obj):
+        return obj.children.count()
+
+
+class TestTagSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = TestTag
+        fields = ['id', 'project', 'name', 'color']
+
+
+class RequirementSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Requirement
+        fields = ['id', 'project', 'external_id', 'title', 'description', 'status', 'created_at', 'updated_at']
+        read_only_fields = ['created_at', 'updated_at']
 
 
 class ProjectSerializer(serializers.ModelSerializer):
     class Meta:
         model = Project
-        fields = ['id', 'tenant_id', 'key', 'name', 'created_at', 'updated_at']
+        fields = ['id', 'tenant_id', 'key', 'name', 'description', 'created_at', 'updated_at']
 
 
 class TestCaseSerializer(serializers.ModelSerializer):
+    labels = serializers.PrimaryKeyRelatedField(queryset=TestTag.objects.all(), many=True, required=False)
+    requirements = serializers.PrimaryKeyRelatedField(queryset=Requirement.objects.all(), many=True, required=False)
+
     class Meta:
         model = TestCase
-        fields = ['id', 'project', 'title', 'description', 'steps', 'tags', 'status', 'version', 'created_at', 'updated_at']
+        fields = [
+            'id', 'project', 'section', 'title', 'description', 'steps', 'tags', 'labels',
+            'requirements', 'status', 'priority', 'version', 'created_at', 'updated_at',
+            'is_automated', 'automation_type', 'automation_ref',
+        ]
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        request = self.context.get('request')
+        tenant_id = getattr(request, 'tenant_id', None) if request else None
+        if tenant_id:
+            self.fields['labels'].queryset = TestTag.objects.filter(project__tenant_id=tenant_id)
+            self.fields['requirements'].queryset = Requirement.objects.filter(project__tenant_id=tenant_id)
 
 
 class SuiteSerializer(serializers.ModelSerializer):
@@ -84,3 +128,23 @@ class TestInstanceSerializer(serializers.ModelSerializer):
             'defects', 'duration_seconds', 'automation_ref', 'started_at', 'finished_at', 'order'
         ]
         read_only_fields = ['duration_seconds', 'started_at', 'finished_at', 'order']
+
+
+class TestImportJobSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = TestImportJob
+        fields = [
+            'id', 'project', 'created_by_user_id', 'file_path', 'file_format', 'status', 'total_records',
+            'processed_records', 'error_message', 'created_at', 'finished_at'
+        ]
+        read_only_fields = ['status', 'total_records', 'processed_records', 'error_message', 'created_at', 'finished_at']
+
+
+class TestExportJobSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = TestExportJob
+        fields = [
+            'id', 'project', 'created_by_user_id', 'query', 'status', 'file_path', 'error_message',
+            'created_at', 'finished_at'
+        ]
+        read_only_fields = ['status', 'file_path', 'error_message', 'created_at', 'finished_at']

@@ -67,8 +67,32 @@ class ApiClient {
     }
 
     if (!response.ok) {
-      const error = await response.json().catch(() => ({ detail: 'Unknown error' }));
-      throw new Error(error.detail || `HTTP ${response.status}`);
+      const error = await response.json().catch(() => null);
+      let message = `HTTP ${response.status}`;
+      if (error) {
+        if (typeof error === 'string') {
+          message = error;
+        } else if (error.detail) {
+          message = typeof error.detail === 'string' ? error.detail : JSON.stringify(error.detail);
+        } else {
+          const firstKey = Object.keys(error)[0];
+          if (firstKey) {
+            const value = error[firstKey];
+            if (Array.isArray(value)) {
+              message = `${firstKey}: ${value[0]}`;
+            } else if (typeof value === 'string') {
+              message = `${firstKey}: ${value}`;
+            } else {
+              try {
+                message = `${firstKey}: ${JSON.stringify(value)}`;
+              } catch (_) {
+                message = `HTTP ${response.status}`;
+              }
+            }
+          }
+        }
+      }
+      throw new Error(message);
     }
     return response.json();
   }
@@ -120,6 +144,13 @@ class ApiClient {
     return this.request('/orgs/api/tenants/');
   }
 
+  async createTenant(payload) {
+    return this.request('/orgs/api/tenants/', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
   async getMemberships(userId) {
     return this.request(`/orgs/api/memberships/?user_id=${userId}`);
   }
@@ -139,16 +170,61 @@ class ApiClient {
     return this.request('/tms/api/projects/');
   }
 
-  async getTestCases(projectId) {
-    return this.request(`/tms/api/testcases/?project=${projectId}`);
+  async createProject(payload) {
+    return this.request('/tms/api/projects/', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async getTestCases(projectId, params = {}) {
+    const search = new URLSearchParams({ project: projectId });
+    Object.entries(params || {}).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && value !== '') {
+        search.append(key, value);
+      }
+    });
+    return this.request(`/tms/api/testcases/?${search.toString()}`);
   }
 
   async getPlans(projectId) {
     return this.request(`/tms/api/plans/?project=${projectId}`);
   }
 
+  async createPlan(payload) {
+    return this.request('/tms/api/plans/', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
   async getRuns(projectId) {
     return this.request(`/tms/api/runs/?project=${projectId}`);
+  }
+
+  async createRun(payload) {
+    return this.request('/tms/api/runs/', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async getSections(projectId) {
+    return this.request(`/tms/api/sections/?project=${projectId}`);
+  }
+
+  async createSection(payload) {
+    return this.request('/tms/api/sections/', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async createTestCase(payload) {
+    return this.request('/tms/api/testcases/', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
   }
 }
 

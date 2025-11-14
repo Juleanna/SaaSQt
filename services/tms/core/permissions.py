@@ -86,7 +86,10 @@ class IsTenantMember(permissions.BasePermission):
         if view.basename == 'project' and request.method in ('POST',):
             tenant_id = request.data.get('tenant_id')
             return _has_membership(request, tenant_id)
-        if view.basename in ('testcase', 'suite', 'suitecase', 'release', 'testplan', 'planitem', 'testrun', 'testinstance') and request.method in ('POST',):
+        managed_basenames = ('testcase', 'suite', 'suitecase', 'release', 'testplan', 'planitem',
+                             'testrun', 'testinstance', 'section', 'testtag', 'requirement',
+                             'importjob', 'exportjob')
+        if view.basename in managed_basenames and request.method in ('POST',):
             # For create we need to resolve project -> tenant_id
             from .models import Project, TestPlan, TestRun
             project_id = request.data.get('project')
@@ -117,7 +120,10 @@ class IsTenantMember(permissions.BasePermission):
 
     def has_object_permission(self, request, view, obj):
         # obj may be Project, TestCase, Suite, SuiteCase, Release, TestPlan, PlanItem, TestRun, TestInstance
-        from .models import Project, TestCase, Suite, SuiteCase, Release, TestPlan, PlanItem, TestRun, TestInstance
+        from .models import (
+            Project, TestCase, Suite, SuiteCase, Release, TestPlan, PlanItem, TestRun, TestInstance,
+            TestSection, TestTag, Requirement, TestImportJob, TestExportJob
+        )
         tenant_id = None
         if isinstance(obj, Project):
             tenant_id = obj.tenant_id
@@ -137,6 +143,16 @@ class IsTenantMember(permissions.BasePermission):
             tenant_id = obj.project.tenant_id
         elif isinstance(obj, TestInstance):
             tenant_id = obj.run.project.tenant_id
+        elif isinstance(obj, TestSection):
+            tenant_id = obj.project.tenant_id
+        elif isinstance(obj, TestTag):
+            tenant_id = obj.project.tenant_id
+        elif isinstance(obj, Requirement):
+            tenant_id = obj.project.tenant_id
+        elif isinstance(obj, TestImportJob):
+            tenant_id = obj.project.tenant_id
+        elif isinstance(obj, TestExportJob):
+            tenant_id = obj.project.tenant_id
         return _has_membership(request, tenant_id)
 
 
@@ -152,7 +168,7 @@ class TenantRBACPermission(permissions.BasePermission):
         tenant_id = getattr(request, 'tenant_id', None)
         if view.basename == 'project' and method in ('POST',):
             tenant_id = tenant_id or request.data.get('tenant_id')
-        elif view.basename in ('testcase', 'suite', 'suitecase') and method in ('POST',):
+        elif view.basename in ('testcase', 'suite', 'suitecase', 'section', 'testtag', 'requirement', 'importjob', 'exportjob') and method in ('POST',):
             project_id = request.data.get('project')
             if project_id:
                 from .models import Project
@@ -198,7 +214,11 @@ class TenantRBACPermission(permissions.BasePermission):
         return any(r in roles for r in allowed)
 
     def has_object_permission(self, request, view, obj):
-        from .models import Project, TestCase, Suite, SuiteCase
+        from .models import (
+            Project, TestCase, Suite, SuiteCase,
+            Release, TestPlan, PlanItem, TestRun, TestInstance,
+            TestSection, TestTag, Requirement, TestImportJob, TestExportJob
+        )
         tenant_id = None
         if isinstance(obj, Project):
             tenant_id = obj.tenant_id
@@ -208,6 +228,26 @@ class TenantRBACPermission(permissions.BasePermission):
             tenant_id = obj.project.tenant_id
         elif isinstance(obj, SuiteCase):
             tenant_id = obj.suite.project.tenant_id
+        elif isinstance(obj, Release):
+            tenant_id = obj.project.tenant_id
+        elif isinstance(obj, TestPlan):
+            tenant_id = obj.project.tenant_id
+        elif isinstance(obj, PlanItem):
+            tenant_id = obj.plan.project.tenant_id
+        elif isinstance(obj, TestRun):
+            tenant_id = obj.project.tenant_id
+        elif isinstance(obj, TestInstance):
+            tenant_id = obj.run.project.tenant_id
+        elif isinstance(obj, TestSection):
+            tenant_id = obj.project.tenant_id
+        elif isinstance(obj, TestTag):
+            tenant_id = obj.project.tenant_id
+        elif isinstance(obj, Requirement):
+            tenant_id = obj.project.tenant_id
+        elif isinstance(obj, TestImportJob):
+            tenant_id = obj.project.tenant_id
+        elif isinstance(obj, TestExportJob):
+            tenant_id = obj.project.tenant_id
         if not tenant_id:
             return False
         if request.method in permissions.SAFE_METHODS:
@@ -236,6 +276,26 @@ class TenantRBACPermission(permissions.BasePermission):
             proj_roles = _project_role_keys(request, tenant_id, obj.project_id)
         elif isinstance(obj, SuiteCase):
             proj_roles = _project_role_keys(request, tenant_id, obj.suite.project_id)
+        elif isinstance(obj, Release):
+            proj_roles = _project_role_keys(request, tenant_id, obj.project_id)
+        elif isinstance(obj, TestPlan):
+            proj_roles = _project_role_keys(request, tenant_id, obj.project_id)
+        elif isinstance(obj, PlanItem):
+            proj_roles = _project_role_keys(request, tenant_id, obj.plan.project_id)
+        elif isinstance(obj, TestRun):
+            proj_roles = _project_role_keys(request, tenant_id, obj.project_id)
+        elif isinstance(obj, TestInstance):
+            proj_roles = _project_role_keys(request, tenant_id, obj.run.project_id)
+        elif isinstance(obj, TestSection):
+            proj_roles = _project_role_keys(request, tenant_id, obj.project_id)
+        elif isinstance(obj, TestTag):
+            proj_roles = _project_role_keys(request, tenant_id, obj.project_id)
+        elif isinstance(obj, Requirement):
+            proj_roles = _project_role_keys(request, tenant_id, obj.project_id)
+        elif isinstance(obj, TestImportJob):
+            proj_roles = _project_role_keys(request, tenant_id, obj.project_id)
+        elif isinstance(obj, TestExportJob):
+            proj_roles = _project_role_keys(request, tenant_id, obj.project_id)
         if proj_roles:
             return any(r in proj_roles for r in allowed)
         roles = _role_keys(request, tenant_id)

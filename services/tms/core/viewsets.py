@@ -1,4 +1,9 @@
-from rest_framework import viewsets
+import csv
+import json
+from pathlib import Path
+
+from django.conf import settings
+from rest_framework import viewsets, mixins
 from rest_framework.permissions import IsAuthenticated
 from .permissions import IsTenantMember, TenantRBACPermission
 from rest_framework.filters import SearchFilter, OrderingFilter
@@ -8,12 +13,15 @@ from django.db import transaction
 from django.db.models import Max
 from .models import (
     Project, TestCase, Suite, SuiteCase,
-    Release, TestCaseVersion, TestPlan, PlanItem, TestRun, TestInstance
+    Release, TestCaseVersion, TestPlan, PlanItem, TestRun, TestInstance,
+    TestSection, TestTag, Requirement, TestImportJob, TestExportJob
 )
 from .serializers import (
     ProjectSerializer, TestCaseSerializer, SuiteSerializer, SuiteCaseSerializer,
     ReleaseSerializer, TestCaseVersionSerializer, TestPlanSerializer,
-    PlanItemSerializer, TestRunSerializer, TestInstanceSerializer
+    PlanItemSerializer, TestRunSerializer, TestInstanceSerializer,
+    TestSectionSerializer, TestTagSerializer, RequirementSerializer,
+    TestImportJobSerializer, TestExportJobSerializer
 )
 from .pagination import CreatedAtCursorPagination
 from rest_framework.decorators import action
@@ -44,12 +52,81 @@ class ProjectViewSet(viewsets.ModelViewSet):
     pagination_class = CreatedAtCursorPagination
 
 
+class TestSectionViewSet(viewsets.ModelViewSet):
+    queryset = TestSection.objects.select_related('project', 'parent').all().order_by('order', 'id')
+    serializer_class = TestSectionSerializer
+    permission_classes = [IsAuthenticated, IsTenantMember, TenantRBACPermission]
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['project', 'parent']
+    search_fields = ['name']
+    ordering_fields = ['order', 'name', 'id']
+    allowed_roles_write = ('owner', 'admin')
+    allowed_roles_create = ('owner', 'admin', 'member')
+    allowed_roles_update = ('owner', 'admin')
+    allowed_roles_delete = ('owner', 'admin')
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        tenant_id = getattr(self.request, 'tenant_id', None)
+        if tenant_id:
+            qs = qs.filter(project__tenant_id=tenant_id)
+        return qs
+
+    def perform_create(self, serializer):
+        project = serializer.validated_data['project']
+        parent = serializer.validated_data.get('parent')
+        max_order = TestSection.objects.filter(project=project, parent=parent).aggregate(Max('order'))['order__max'] or 0
+        serializer.save(order=max_order + 1)
+
+
+class TestTagViewSet(viewsets.ModelViewSet):
+    queryset = TestTag.objects.select_related('project').all().order_by('name')
+    serializer_class = TestTagSerializer
+    permission_classes = [IsAuthenticated, IsTenantMember, TenantRBACPermission]
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['project', 'name']
+    search_fields = ['name']
+    ordering_fields = ['name', 'id']
+    allowed_roles_write = ('owner', 'admin')
+    allowed_roles_create = ('owner', 'admin', 'member')
+    allowed_roles_update = ('owner', 'admin')
+    allowed_roles_delete = ('owner', 'admin')
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        tenant_id = getattr(self.request, 'tenant_id', None)
+        if tenant_id:
+            qs = qs.filter(project__tenant_id=tenant_id)
+        return qs
+
+
+class RequirementViewSet(viewsets.ModelViewSet):
+    queryset = Requirement.objects.select_related('project').all().order_by('-updated_at')
+    serializer_class = RequirementSerializer
+    permission_classes = [IsAuthenticated, IsTenantMember, TenantRBACPermission]
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['project', 'status', 'external_id']
+    search_fields = ['title', 'description', 'external_id']
+    ordering_fields = ['updated_at', 'title', 'status']
+    allowed_roles_write = ('owner', 'admin')
+    allowed_roles_create = ('owner', 'admin', 'member')
+    allowed_roles_update = ('owner', 'admin', 'member')
+    allowed_roles_delete = ('owner', 'admin')
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        tenant_id = getattr(self.request, 'tenant_id', None)
+        if tenant_id:
+            qs = qs.filter(project__tenant_id=tenant_id)
+        return qs
+
+
 class TestCaseViewSet(viewsets.ModelViewSet):
-    queryset = TestCase.objects.select_related('project').all().order_by('id')
+    queryset = TestCase.objects.select_related('project', 'section').prefetch_related('labels', 'requirements').all().order_by('id')
     serializer_class = TestCaseSerializer
     permission_classes = [IsAuthenticated, IsTenantMember, TenantRBACPermission]
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
-    filterset_fields = ['project', 'status']
+    filterset_fields = ['project', 'status', 'section', 'priority', 'labels', 'requirements']
     search_fields = ['title', 'description']
     ordering_fields = ['id', 'title', 'updated_at']
     allowed_roles_write = ('owner', 'admin')
@@ -560,10 +637,207 @@ class TestInstanceViewSet(viewsets.ModelViewSet):
         self._finish(inst, 'blocked')
         return Response(self.get_serializer(inst).data)
 
+
+class TestImportJobViewSet(mixins.CreateModelMixin,
+                           mixins.ListModelMixin,
+                           mixins.RetrieveModelMixin,
+                           viewsets.GenericViewSet):
+    queryset = TestImportJob.objects.select_related('project').all().order_by('-created_at')
+    serializer_class = TestImportJobSerializer
+    permission_classes = [IsAuthenticated, IsTenantMember, TenantRBACPermission]
+    filter_backends = [DjangoFilterBackend, OrderingFilter]
+    filterset_fields = ['project', 'status']
+    ordering_fields = ['created_at', 'status']
+    allowed_roles_create = ('owner', 'admin')
+    allowed_roles_write = ('owner', 'admin')
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        tenant_id = getattr(self.request, 'tenant_id', None)
+        if tenant_id:
+            qs = qs.filter(project__tenant_id=tenant_id)
+        return qs
+
+    def perform_create(self, serializer):
+        serializer.save(created_by_user_id=getattr(self.request.user, 'id', None))
+        # TODO: enqueue Celery task to process the import file
+
+
+class TestExportJobViewSet(mixins.CreateModelMixin,
+                           mixins.ListModelMixin,
+                           mixins.RetrieveModelMixin,
+                           viewsets.GenericViewSet):
+    queryset = TestExportJob.objects.select_related('project').all().order_by('-created_at')
+    serializer_class = TestExportJobSerializer
+    permission_classes = [IsAuthenticated, IsTenantMember, TenantRBACPermission]
+    filter_backends = [DjangoFilterBackend, OrderingFilter]
+    filterset_fields = ['project', 'status']
+    ordering_fields = ['created_at', 'status']
+    allowed_roles_create = ('owner', 'admin')
+    allowed_roles_write = ('owner', 'admin')
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        tenant_id = getattr(self.request, 'tenant_id', None)
+        if tenant_id:
+            qs = qs.filter(project__tenant_id=tenant_id)
+        return qs
+
+    def perform_create(self, serializer):
+        job = serializer.save(created_by_user_id=getattr(self.request.user, 'id', None))
+        _process_export_job(job)
+
+
+def _resolve_path(base_setting, default_subdir, provided_path=None):
+    root = Path(getattr(settings, base_setting, Path(settings.BASE_DIR) / default_subdir))
+    root.mkdir(parents=True, exist_ok=True)
+    if provided_path:
+        path = Path(provided_path)
+        if not path.is_absolute():
+            path = root / path
+        return path
+    return root
+
+
+def _parse_steps(raw_value):
+    if not raw_value:
+        return []
+    if isinstance(raw_value, list):
+        return raw_value
+    try:
+        parsed = json.loads(raw_value)
+        if isinstance(parsed, list):
+            return parsed
+    except Exception:
+        pass
+    steps = [text.strip() for text in str(raw_value).splitlines() if text.strip()]
+    return [{'order': idx + 1, 'action': step, 'expected': ''} for idx, step in enumerate(steps)]
+
+
+def _ensure_section(project, section_name):
+    if not section_name:
+        return None
+    section_name = section_name.strip()
+    if not section_name:
+        return None
+    section, _ = TestSection.objects.get_or_create(project=project, parent=None, name=section_name)
+    return section
+
+
+def _process_import_job(job: TestImportJob):
+    job.status = 'processing'
+    job.error_message = ''
+    job.total_records = 0
+    job.processed_records = 0
+    job.save(update_fields=['status', 'error_message', 'total_records', 'processed_records'])
+    path = _resolve_path('TEST_MANAGER_IMPORT_ROOT', 'imports', job.file_path)
+    try:
+        project = job.project
+        if not path.exists():
+            raise FileNotFoundError(f'Import file not found: {path}')
+        with path.open(newline='', encoding='utf-8') as csvfile:
+            reader = csv.DictReader(csvfile)
+            total = 0
+            processed = 0
+            for row in reader:
+                total += 1
+                title = (row.get('title') or '').strip()
+                if not title:
+                    continue
+                priority = (row.get('priority') or 'medium').lower()
+                if priority not in dict(TestCase.PRIORITY_CHOICES):
+                    priority = 'medium'
+                section = _ensure_section(project, row.get('section'))
+                steps_payload = _parse_steps(row.get('steps') or row.get('steps_json'))
+                description = row.get('description') or ''
+                tags = [tag.strip() for tag in (row.get('tags') or '').split(',') if tag.strip()]
+                testcase = TestCase.objects.create(
+                    project=project,
+                    section=section,
+                    title=title,
+                    description=description,
+                    priority=priority,
+                    steps=steps_payload,
+                    tags=tags,
+                )
+                processed += 1
+            job.total_records = total
+            job.processed_records = processed
+            job.status = 'completed'
+            job.finished_at = timezone.now()
+            job.save(update_fields=['total_records', 'processed_records', 'status', 'finished_at'])
+    except Exception as exc:
+        job.status = 'failed'
+        job.error_message = str(exc)
+        job.finished_at = timezone.now()
+        job.save(update_fields=['status', 'error_message', 'finished_at'])
+
+
+def _process_export_job(job: TestExportJob):
+    job.status = 'processing'
+    job.error_message = ''
+    job.save(update_fields=['status', 'error_message'])
+    try:
+        qs = TestCase.objects.filter(project=job.project).select_related('section')
+        filters = job.query or {}
+        section = filters.get('section')
+        if section:
+            qs = qs.filter(section_id=section)
+        status_filter = filters.get('status')
+        if status_filter:
+            qs = qs.filter(status=status_filter)
+        priority = filters.get('priority')
+        if priority:
+            qs = qs.filter(priority=priority)
+
+        export_root = _resolve_path('TEST_MANAGER_EXPORT_ROOT', 'exports')
+        filename = job.file_path or f'testcases_export_{job.id}.csv'
+        path = _resolve_path('TEST_MANAGER_EXPORT_ROOT', 'exports', filename)
+        with path.open('w', newline='', encoding='utf-8') as csvfile:
+            writer = csv.writer(csvfile)
+            writer.writerow(['title', 'description', 'priority', 'status', 'section', 'steps'])
+            for testcase in qs.order_by('id'):
+                steps_serialized = json.dumps(testcase.steps)
+                writer.writerow([
+                    testcase.title,
+                    testcase.description,
+                    testcase.priority,
+                    testcase.status,
+                    testcase.section.name if testcase.section else '',
+                    steps_serialized,
+                ])
+        job.file_path = str(path)
+        job.status = 'completed'
+        job.finished_at = timezone.now()
+        job.save(update_fields=['file_path', 'status', 'finished_at'])
+    except Exception as exc:
+        job.status = 'failed'
+        job.error_message = str(exc)
+        job.finished_at = timezone.now()
+        job.save(update_fields=['status', 'error_message', 'finished_at'])
+
     @action(detail=True, methods=['post'])
     def skip(self, request, pk=None):
         inst = self.get_object()
         self._finish(inst, 'skipped')
+        return Response(self.get_serializer(inst).data)
+
+    @action(detail=True, methods=['post'])
+    def link_defect(self, request, pk=None):
+        inst = self.get_object()
+        bug_url = request.data.get('url') or request.data.get('bug_url')
+        if not bug_url:
+            return Response({'detail': 'url or bug_url required'}, status=400)
+        defect_entry = {
+            'url': bug_url,
+            'title': request.data.get('title', ''),
+            'note': request.data.get('note', ''),
+            'linked_at': timezone.now().isoformat(),
+        }
+        defects = inst.defects or []
+        defects.append(defect_entry)
+        inst.defects = defects
+        inst.save(update_fields=['defects'])
         return Response(self.get_serializer(inst).data)
 
     @action(detail=True, methods=['post'])

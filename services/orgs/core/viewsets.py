@@ -20,6 +20,32 @@ class TenantViewSet(viewsets.ModelViewSet):
     throttle_classes = []
     pagination_class = CreatedAtCursorPagination
 
+    def perform_create(self, serializer):
+        user_id = getattr(self.request.user, 'id', None)
+        with transaction.atomic():
+            tenant = serializer.save(owner_user_id=user_id)
+            default_roles = [
+                {"key": "owner", "name": "Owner", "description": "Повний доступ", "is_system": True},
+                {"key": "admin", "name": "Admin", "description": "Адміністрування без прав власника", "is_system": True},
+                {"key": "member", "name": "Member", "description": "Звичайний учасник", "is_system": True},
+            ]
+            role_map = {}
+            for data in default_roles:
+                role, _ = Role.objects.get_or_create(
+                    tenant=tenant,
+                    key=data["key"],
+                    defaults={
+                        "name": data["name"],
+                        "description": data.get("description", ""),
+                        "is_system": data.get("is_system", False),
+                    },
+                )
+                role_map[data["key"]] = role
+            if user_id:
+                owner_role = role_map.get("owner")
+                Membership.objects.get_or_create(tenant=tenant, user_id=user_id, defaults={"role": owner_role})
+        return tenant
+
     @action(detail=True, methods=['post'])
     def seed_roles(self, request, pk=None):
         tenant = self.get_object()

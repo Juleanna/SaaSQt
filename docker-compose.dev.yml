@@ -121,7 +121,10 @@ services:
     ports:
       - "8001:8000"
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:8000/api/health || exit 1"]
+      test:
+        - "CMD-SHELL"
+        - >
+          python -c "import urllib.request,sys;sys.exit(0 if urllib.request.urlopen('http://localhost:8000/api/health', timeout=3).status < 400 else 1)"
       interval: 10s
       timeout: 3s
       retries: 10
@@ -251,7 +254,10 @@ services:
     ports:
       - "8002:8000"
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:8000/api/health || exit 1"]
+      test:
+        - "CMD-SHELL"
+        - >
+          python -c "import urllib.request,sys;sys.exit(0 if urllib.request.urlopen('http://localhost:8000/api/health', timeout=3).status < 400 else 1)"
       interval: 10s
       timeout: 3s
       retries: 10
@@ -302,7 +308,10 @@ services:
     ports:
       - "8003:8000"
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:8000/api/health || exit 1"]
+      test:
+        - "CMD-SHELL"
+        - >
+          python -c "import urllib.request,sys;sys.exit(0 if urllib.request.urlopen('http://localhost:8000/api/health', timeout=3).status < 400 else 1)"
       interval: 10s
       timeout: 3s
       retries: 10

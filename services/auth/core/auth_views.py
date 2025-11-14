@@ -71,6 +71,25 @@ class MeView(APIView):
 class SwitchTenantView(APIView):
     permission_classes = [IsAuthenticated]
 
+    @staticmethod
+    def _has_membership_payload(payload, tenant_id):
+        if isinstance(payload, list):
+            return any(
+                isinstance(item, dict) and int(item.get('tenant', 0)) == tenant_id
+                for item in payload
+            )
+        if isinstance(payload, dict):
+            results = payload.get('results')
+            if isinstance(results, list):
+                return any(
+                    isinstance(item, dict) and int(item.get('tenant', 0)) == tenant_id
+                    for item in results
+                )
+            count = payload.get('count')
+            if isinstance(count, int):
+                return count > 0
+        return False
+
     def post(self, request):
         tenant_id = request.data.get('tenant_id')
         try:
@@ -82,16 +101,25 @@ class SwitchTenantView(APIView):
         if not svc:
             return Response({'detail': 'Service token not configured'}, status=500)
         try:
-            r = requests.get(f"{base.rstrip('/')}/memberships/", params={'tenant': tenant_id, 'user_id': request.user.id}, headers={'Authorization': f'Service {svc}'}, timeout=3)
+            r = requests.get(
+                f"{base.rstrip('/')}/memberships/",
+                params={'tenant': tenant_id, 'user_id': request.user.id},
+                headers={'Authorization': f'Service {svc}'},
+                timeout=3,
+            )
             ok = False
             if r.status_code == 200:
-                js = r.json()
-                if isinstance(js, list):
-                    ok = any(isinstance(it, dict) and int(it.get('tenant')) == tenant_id for it in js)
-                elif isinstance(js, dict):
-                    cnt = js.get('count')
-                    if isinstance(cnt, int):
-                        ok = cnt > 0
+                ok = self._has_membership_payload(r.json(), tenant_id)
+            if not ok:
+                tenant_resp = requests.get(
+                    f"{base.rstrip('/')}/tenants/{tenant_id}/",
+                    headers={'Authorization': f'Service {svc}'},
+                    timeout=3,
+                )
+                if tenant_resp.status_code == 200:
+                    owner_user_id = tenant_resp.json().get('owner_user_id')
+                    if owner_user_id and int(owner_user_id) == request.user.id:
+                        ok = True
             if not ok:
                 return Response({'detail': 'Not a member of tenant'}, status=403)
         except Exception:

@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import api from '../api/client';
 
 const TENANTS_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
@@ -40,6 +40,19 @@ export function AuthProvider({ children }) {
     } catch (_) {}
   };
 
+  const refreshMemberships = useCallback(async (overrideUserId = null) => {
+    const targetUserId = overrideUserId ?? user?.id;
+    if (!targetUserId) return [];
+    try {
+      const membershipData = await api.getMemberships(targetUserId);
+      const arr = membershipData.results || membershipData || [];
+      setMemberships(arr);
+      return arr;
+    } catch (_) {
+      return [];
+    }
+  }, [user?.id]);
+
   useEffect(() => {
     (async () => {
       try {
@@ -80,9 +93,7 @@ export function AuthProvider({ children }) {
     setUser(userData);
 
     try {
-      const membershipData = await api.getMemberships(userData.id);
-      const arr = membershipData.results || membershipData || [];
-      setMemberships(arr);
+      const arr = await refreshMemberships(userData.id);
       await refreshTenants();
 
       if (tenantId) {
@@ -129,6 +140,7 @@ export function AuthProvider({ children }) {
         tenants,
         tenantNameById,
         refreshTenants,
+        refreshMemberships,
       }}
     >
       {children}
